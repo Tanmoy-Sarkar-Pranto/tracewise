@@ -2,22 +2,25 @@ FROM python:3.12-slim
 
 RUN pip install uv
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser
+# Keep venv outside /app so the dev volume mount doesn't overwrite it
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV UV_LINK_MODE=copy
 
-WORKDIR /app
-
-# Copy dependency manifest first for layer caching
-COPY pyproject.toml ./
-RUN uv sync --extra dev
-
-# Copy source after deps are installed
-COPY . .
-
-# Fix ownership
-RUN chown -R appuser:appuser /app
+# Create non-root user, /app, and /opt/venv — all as root, then hand over
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app /opt/venv \
+    && chown appuser:appuser /app /opt/venv
 
 USER appuser
+WORKDIR /app
+
+# Install dependencies first (without the project itself) for layer caching
+COPY --chown=appuser:appuser pyproject.toml ./
+RUN uv sync --extra dev --no-install-project
+
+# Copy source, then install the project itself
+COPY --chown=appuser:appuser . .
+RUN uv sync --extra dev
 
 EXPOSE 8000
 
