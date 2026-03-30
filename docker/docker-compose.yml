@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ..:/app
+      - tracewise-data:/home/appuser/.tracewise
+    environment:
+      - TRACEWISE_ENABLED=true
+    command: ["uv", "run", "uvicorn", "tests.testapp.main:app",
+              "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+volumes:
+  tracewise-data:

@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+
+# uv
+.uv/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff / linters
+.ruff_cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TraceWise local data
+*.db
+*.db-shm
+*.db-wal
+.tracewise/
+/docs
+*.md
