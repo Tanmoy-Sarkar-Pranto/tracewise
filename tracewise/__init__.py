@@ -41,7 +41,7 @@ def init(
     _storage = SQLiteStorage(db_path=db_path, max_traces=max_traces)
     _decorators._storage = _storage
 
-    app.add_middleware(TraceWiseMiddleware, storage=_storage)
+    app.add_middleware(TraceWiseMiddleware, storage=_storage, skip_prefixes=["/tracewise"])
 
     viewer = create_viewer_app(storage=_storage)
     app.mount("/tracewise", viewer)

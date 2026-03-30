@@ -17,11 +17,15 @@ def _utcnow() -> datetime:
 
 
 class TraceWiseMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, storage: BaseStorage, **kwargs):
+    def __init__(self, app, storage: BaseStorage, skip_prefixes: list[str] | None = None, **kwargs):
         super().__init__(app, **kwargs)
         self._storage = storage
+        self._skip_prefixes = skip_prefixes or []
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        if any(request.url.path.startswith(p) for p in self._skip_prefixes):
+            return await call_next(request)
+
         span = Span(
             trace_id=uuid4().hex,
             span_id=uuid4().hex,
