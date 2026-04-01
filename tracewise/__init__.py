@@ -12,6 +12,7 @@ from tracewise.core.context import get_current_span as _get_current_span
 from tracewise.core.context import reset_span, set_current_span
 from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.instrumentation import decorators as _decorators
+from tracewise.instrumentation.middleware import _record_exception
 
 _storage = None
 
@@ -111,6 +112,7 @@ async def start_span(name: str, **attributes) -> AsyncIterator[Span]:
     except Exception as exc:
         span.status = SpanStatus.ERROR
         span.attributes["error.message"] = str(exc)
+        _record_exception(span, exc)
         raise
     finally:
         span.end_time = _utcnow()

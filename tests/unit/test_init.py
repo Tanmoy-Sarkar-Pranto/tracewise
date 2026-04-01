@@ -126,3 +126,31 @@ async def test_capture_logs_end_to_end(tmp_path):
     assert root_events[0]["name"] == "log.WARNING"
     assert root_events[0]["attributes"]["log.message"] == "processing started"
     assert root_events[0]["attributes"]["log.logger"] == "myapp"
+
+
+async def test_start_span_records_exception_event(tmp_path):
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "t.db"))
+
+    @app.get("/risky")
+    async def risky():
+        try:
+            async with tracewise.start_span("risky.op"):
+                raise RuntimeError("fail inside context")
+        except RuntimeError:
+            pass
+        return {}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/risky")
+
+    storage = tracewise._storage
+    all_spans = storage.get_trace(storage.list_traces()[0])
+    span = next(s for s in all_spans if s.name == "risky.op")
+    assert len(span.events) == 1
+    event = span.events[0]
+    assert event.name == "exception"
+    assert event.attributes["exception.type"] == "RuntimeError"
+    assert event.attributes["exception.message"] == "fail inside context"
+    assert "Traceback" in event.attributes["exception.stacktrace"]
+    assert "RuntimeError" in event.attributes["exception.stacktrace"]
