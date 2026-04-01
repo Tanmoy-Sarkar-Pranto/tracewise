@@ -53,6 +53,22 @@ class TraceWiseMiddleware(BaseHTTPMiddleware):
                 "http.url": str(request.url),
             },
         )
+        query_string = request.url.query
+        if query_string:
+            span.attributes["http.query_string"] = query_string
+
+        client = request.client
+        if client is not None and client.host:
+            span.attributes["http.client_ip"] = client.host
+
+        user_agent = request.headers.get("user-agent")
+        if user_agent:
+            span.attributes["http.user_agent"] = user_agent
+
+        request_content_type = request.headers.get("content-type")
+        if request_content_type:
+            span.attributes["http.request_content_type"] = request_content_type
+
         token = set_current_span(span)
         self._storage.save_span(span)
         try:

@@ -21,6 +21,10 @@ def app(storage):
     async def hello():
         return {"msg": "hello"}
 
+    @_app.post("/inspect")
+    async def inspect():
+        return {"ok": True}
+
     @_app.get("/error")
     async def error():
         raise ValueError("boom")
@@ -84,3 +88,37 @@ async def test_error_span_has_exception_event(app, storage):
     assert event.attributes["exception.message"] == "boom"
     assert "Traceback" in event.attributes["exception.stacktrace"]
     assert "ValueError" in event.attributes["exception.stacktrace"]
+
+
+async def test_request_metadata_is_captured(app, storage):
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("203.0.113.10", 50000)),
+        base_url="http://test",
+    ) as client:
+        await client.post(
+            "/inspect?foo=bar&page=2",
+            content=b"{}",
+            headers={
+                "User-Agent": "pytest-agent",
+                "Content-Type": "application/json",
+            },
+        )
+
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.attributes["http.query_string"] == "foo=bar&page=2"
+    assert span.attributes["http.client_ip"] == "203.0.113.10"
+    assert span.attributes["http.user_agent"] == "pytest-agent"
+    assert span.attributes["http.request_content_type"] == "application/json"
+
+
+async def test_missing_request_metadata_is_omitted(app, storage):
+    async with AsyncClient(
+        transport=ASGITransport(app=app, client=("203.0.113.11", 50001)),
+        base_url="http://test",
+    ) as client:
+        await client.get("/hello")
+
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert "http.query_string" not in span.attributes
+    assert "http.request_content_type" not in span.attributes
+    assert span.attributes["http.client_ip"] == "203.0.113.11"
