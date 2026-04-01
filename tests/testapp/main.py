@@ -17,6 +17,7 @@ import asyncio
 import logging
 from datetime import datetime
 
+import httpx
 import tracewise
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -24,12 +25,19 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="TraceWise Test App")
-tracewise.init(app, capture_logs=logging.INFO)
+tracewise.init(app, capture_logs=logging.INFO, instrument_httpx=True)
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+
+@app.get("/proxy-health")
+async def proxy_health():
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:8000") as client:
+        response = await client.get("/health")
+    return response.json()
 
 
 @app.get("/users")

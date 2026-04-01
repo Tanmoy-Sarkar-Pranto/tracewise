@@ -1,6 +1,9 @@
 import pytest
 from datetime import datetime, timezone
 from tracewise.core.models import Span, SpanKind, SpanStatus
+import tracewise
+from tracewise.instrumentation import decorators as _decorators
+from tracewise.instrumentation import httpx as _httpx_instrumentation
 
 
 def utcnow() -> datetime:
@@ -33,3 +36,12 @@ def make_span():
             attributes=dict(attributes),
         )
     return _make
+
+
+@pytest.fixture(autouse=True)
+def reset_tracewise_private_state():
+    yield
+    tracewise._storage = None
+    tracewise._httpx_instrumentation_enabled = False
+    _decorators._storage = None
+    _httpx_instrumentation.reset_async_httpx_instrumentation()

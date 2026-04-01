@@ -15,6 +15,7 @@ from tracewise.instrumentation import decorators as _decorators
 from tracewise.instrumentation.middleware import _record_exception
 
 _storage = None
+_httpx_instrumentation_enabled = False
 
 
 def init(
@@ -24,15 +25,26 @@ def init(
     max_traces: int = 1000,
     enabled: bool = True,
     capture_logs: bool | int = False,
+    instrument_httpx: bool = False,
 ) -> None:
+    global _storage, _httpx_instrumentation_enabled
+
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
     if not (enabled and env_enabled):
+        from tracewise.instrumentation.httpx import reset_async_httpx_instrumentation
+
+        _storage = None
+        _decorators._storage = None
+        _httpx_instrumentation_enabled = False
+        reset_async_httpx_instrumentation()
         return
 
-    global _storage
-
     from tracewise.storage.sqlite import SQLiteStorage
+    from tracewise.instrumentation.httpx import (
+        install_async_httpx_instrumentation,
+        reset_async_httpx_instrumentation,
+    )
     from tracewise.instrumentation.middleware import TraceWiseMiddleware
     from tracewise.viewer.app import create_viewer_app
 
@@ -41,6 +53,7 @@ def init(
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     _storage = SQLiteStorage(db_path=db_path, max_traces=max_traces)
+    _httpx_instrumentation_enabled = instrument_httpx
     _decorators._storage = _storage
 
     app.add_middleware(TraceWiseMiddleware, storage=_storage, skip_prefixes=["/tracewise"])
@@ -54,6 +67,14 @@ def init(
         level = logging.NOTSET if capture_logs is True else capture_logs
         handler = TraceWiseLogHandler(level=level)
         logging.getLogger().addHandler(handler)
+
+    if instrument_httpx:
+        install_async_httpx_instrumentation(
+            should_trace_httpx=lambda: _httpx_instrumentation_enabled,
+            get_storage=lambda: _storage,
+        )
+    else:
+        reset_async_httpx_instrumentation()
 
 
 def get_current_span() -> Span | None:

@@ -1,11 +1,13 @@
 import logging
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 import tracewise
 from tracewise.core.models import SpanStatus
+from tracewise.instrumentation import decorators as _decorators
 from tracewise.instrumentation.logging import TraceWiseLogHandler
 
 
@@ -20,6 +22,50 @@ def test_init_disabled_does_not_mount_viewer(tmp_path):
     tracewise.init(app, db_path=str(tmp_path / "t.db"), enabled=False)
     paths = [str(getattr(r, "path", "")) for r in app.routes]
     assert not any("/tracewise" in p for p in paths)
+
+
+def test_init_disabled_clears_state_and_unpatches_httpx(tmp_path):
+    original_send = httpx.AsyncClient.send
+    app = FastAPI()
+    tracewise.init(
+        app,
+        db_path=str(tmp_path / "enabled.db"),
+        instrument_httpx=True,
+    )
+    assert tracewise._storage is not None
+    assert _decorators._storage is tracewise._storage
+    assert tracewise._httpx_instrumentation_enabled is True
+    assert httpx.AsyncClient.send is not original_send
+
+    disabled_app = FastAPI()
+    tracewise.init(disabled_app, db_path=str(tmp_path / "disabled.db"), enabled=False)
+
+    assert tracewise._storage is None
+    assert _decorators._storage is None
+    assert tracewise._httpx_instrumentation_enabled is False
+    assert httpx.AsyncClient.send is original_send
+
+
+def test_init_opt_out_after_opt_in_unpatches_httpx(tmp_path):
+    original_send = httpx.AsyncClient.send
+
+    first_app = FastAPI()
+    tracewise.init(
+        first_app,
+        db_path=str(tmp_path / "first.db"),
+        instrument_httpx=True,
+    )
+    assert httpx.AsyncClient.send is not original_send
+    assert tracewise._httpx_instrumentation_enabled is True
+
+    second_app = FastAPI()
+    tracewise.init(
+        second_app,
+        db_path=str(tmp_path / "second.db"),
+        instrument_httpx=False,
+    )
+    assert tracewise._httpx_instrumentation_enabled is False
+    assert httpx.AsyncClient.send is original_send
 
 
 def test_init_mounts_viewer_route(tmp_path):
