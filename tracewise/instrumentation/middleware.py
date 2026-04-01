@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -8,12 +9,24 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from tracewise.core.context import reset_span, set_current_span
-from tracewise.core.models import Span, SpanKind, SpanStatus
+from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.storage.base import BaseStorage
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _record_exception(span: Span, exc: Exception) -> None:
+    span.events.append(SpanEvent(
+        name="exception",
+        timestamp=_utcnow(),
+        attributes={
+            "exception.type": type(exc).__name__,
+            "exception.message": str(exc),
+            "exception.stacktrace": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        },
+    ))
 
 
 class TraceWiseMiddleware(BaseHTTPMiddleware):
@@ -50,6 +63,7 @@ class TraceWiseMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             span.status = SpanStatus.ERROR
             span.attributes["error.message"] = str(exc)
+            _record_exception(span, exc)
             raise
         finally:
             span.end_time = _utcnow()

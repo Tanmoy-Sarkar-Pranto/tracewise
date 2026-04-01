@@ -69,3 +69,18 @@ async def test_separate_requests_have_separate_trace_ids(app, storage):
         await client.get("/hello")
     traces = storage.list_traces(limit=10)
     assert len(traces) == 2
+
+
+async def test_error_span_has_exception_event(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with pytest.raises(Exception):
+            await client.get("/error")
+    spans = storage.get_trace(storage.list_traces()[0])
+    span = spans[0]
+    assert len(span.events) == 1
+    event = span.events[0]
+    assert event.name == "exception"
+    assert event.attributes["exception.type"] == "ValueError"
+    assert event.attributes["exception.message"] == "boom"
+    assert "Traceback" in event.attributes["exception.stacktrace"]
+    assert "ValueError" in event.attributes["exception.stacktrace"]
