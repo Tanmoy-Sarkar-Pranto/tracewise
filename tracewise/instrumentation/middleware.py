@@ -75,6 +75,14 @@ class TraceWiseMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             span.status = SpanStatus.OK
             span.attributes["http.status_code"] = response.status_code
+            response_content_length = response.headers.get("content-length")
+            if response_content_length:
+                span.attributes["http.response_content_length"] = response_content_length
+
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", None)
+            if route_path:
+                span.attributes["http.route"] = route_path
             return response
         except Exception as exc:
             span.status = SpanStatus.ERROR

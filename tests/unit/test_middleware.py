@@ -25,6 +25,10 @@ def app(storage):
     async def inspect():
         return {"ok": True}
 
+    @_app.get("/users/{user_id}")
+    async def get_user(user_id: str):
+        return {"user_id": user_id}
+
     @_app.get("/error")
     async def error():
         raise ValueError("boom")
@@ -122,3 +126,19 @@ async def test_missing_request_metadata_is_omitted(app, storage):
     assert "http.query_string" not in span.attributes
     assert "http.request_content_type" not in span.attributes
     assert span.attributes["http.client_ip"] == "203.0.113.11"
+
+
+async def test_response_content_length_is_captured(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/hello")
+
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.attributes["http.response_content_length"] == resp.headers["content-length"]
+
+
+async def test_route_template_is_captured(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/users/abc-123")
+
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.attributes["http.route"] == "/users/{user_id}"
