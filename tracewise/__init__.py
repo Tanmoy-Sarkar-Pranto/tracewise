@@ -32,18 +32,18 @@ def init(
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
     if not (enabled and env_enabled):
-        from tracewise.instrumentation.httpx import reset_async_httpx_instrumentation
+        from tracewise.instrumentation.httpx import reset_httpx_instrumentation
 
         _storage = None
         _decorators._storage = None
         _httpx_instrumentation_enabled = False
-        reset_async_httpx_instrumentation()
+        reset_httpx_instrumentation()
         return
 
     from tracewise.storage.sqlite import SQLiteStorage
     from tracewise.instrumentation.httpx import (
-        install_async_httpx_instrumentation,
-        reset_async_httpx_instrumentation,
+        install_httpx_instrumentation,
+        reset_httpx_instrumentation,
     )
     from tracewise.instrumentation.middleware import TraceWiseMiddleware
     from tracewise.viewer.app import create_viewer_app
@@ -69,12 +69,12 @@ def init(
         logging.getLogger().addHandler(handler)
 
     if instrument_httpx:
-        install_async_httpx_instrumentation(
+        install_httpx_instrumentation(
             should_trace_httpx=lambda: _httpx_instrumentation_enabled,
             get_storage=lambda: _storage,
         )
     else:
-        reset_async_httpx_instrumentation()
+        reset_httpx_instrumentation()
 
 
 def get_current_span() -> Span | None:

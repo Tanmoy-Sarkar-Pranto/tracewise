@@ -44,4 +44,4 @@ def reset_tracewise_private_state():
     tracewise._storage = None
     tracewise._httpx_instrumentation_enabled = False
     _decorators._storage = None
-    _httpx_instrumentation.reset_async_httpx_instrumentation()
+    _httpx_instrumentation.reset_httpx_instrumentation()

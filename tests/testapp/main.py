@@ -40,6 +40,13 @@ async def proxy_health():
     return response.json()
 
 
+@app.get("/proxy-health-sync")
+def proxy_health_sync():
+    with httpx.Client(base_url="http://127.0.0.1:8000") as client:
+        response = client.get("/health")
+    return response.json()
+
+
 @app.get("/users")
 async def list_users():
     logger.info("Fetching users from database")
