@@ -22,6 +22,7 @@ def init(
     db_path: str | None = None,
     max_traces: int = 1000,
     enabled: bool = True,
+    capture_logs: bool | int = False,
 ) -> None:
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
@@ -45,6 +46,13 @@ def init(
 
     viewer = create_viewer_app(storage=_storage)
     app.mount("/tracewise", viewer)
+
+    if capture_logs is not False:
+        import logging
+        from tracewise.instrumentation.logging import TraceWiseLogHandler
+        level = logging.NOTSET if capture_logs is True else capture_logs
+        handler = TraceWiseLogHandler(level=level)
+        logging.getLogger().addHandler(handler)
 
 
 def get_current_span() -> Span | None:
