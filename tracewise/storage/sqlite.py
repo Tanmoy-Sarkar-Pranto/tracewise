@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.storage.base import BaseStorage
@@ -66,22 +68,47 @@ def _row_to_span(row: dict) -> Span:
 
 class SQLiteStorage(BaseStorage):
     def __init__(self, db_path: str | Path = ":memory:", max_traces: int = 1000):
-        self._db_path = str(db_path)
         self._max_traces = max_traces
-        self._conn = sqlite3.connect(
+        self._local = threading.local()
+        raw_db_path = str(db_path)
+
+        # A named shared-cache memory database lets per-thread connections
+        # see the same state while keeping the database alive via _anchor_conn.
+        if raw_db_path == ":memory:":
+            self._db_path = f"file:tracewise-{uuid4().hex}?mode=memory&cache=shared"
+            self._use_uri = True
+        else:
+            self._db_path = raw_db_path
+            self._use_uri = raw_db_path.startswith("file:")
+
+        self._anchor_conn = self._connect()
+        self._anchor_conn.executescript(_CREATE_TABLE)
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(
             self._db_path,
             check_same_thread=False,
             isolation_level=None,
+            timeout=30,
+            uri=self._use_uri,
         )
-        self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(_CREATE_TABLE)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _get_conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._connect()
+            self._local.conn = conn
+        return conn
 
     def save_span(self, span: Span) -> None:
+        conn = self._get_conn()
         events_json = json.dumps([
             {"name": e.name, "timestamp": _fmt_dt(e.timestamp), "attributes": e.attributes}
             for e in span.events
         ])
-        self._conn.execute(
+        conn.execute(
             """
             INSERT INTO spans
                 (span_id, trace_id, parent_span_id, name, kind,
@@ -101,11 +128,12 @@ class SQLiteStorage(BaseStorage):
         self.delete_old_traces(keep=self._max_traces)
 
     def update_span(self, span: Span) -> None:
+        conn = self._get_conn()
         events_json = json.dumps([
             {"name": e.name, "timestamp": _fmt_dt(e.timestamp), "attributes": e.attributes}
             for e in span.events
         ])
-        self._conn.execute(
+        conn.execute(
             """
             UPDATE spans SET
                 end_time=?, status=?, attributes=?, events=?, meta=?
@@ -122,14 +150,16 @@ class SQLiteStorage(BaseStorage):
         )
 
     def get_trace(self, trace_id: str) -> list[Span]:
-        rows = self._conn.execute(
+        conn = self._get_conn()
+        rows = conn.execute(
             "SELECT * FROM spans WHERE trace_id=? ORDER BY start_time",
             (trace_id,),
         ).fetchall()
         return [_row_to_span(dict(row)) for row in rows]
 
     def list_traces(self, limit: int = 50) -> list[str]:
-        rows = self._conn.execute(
+        conn = self._get_conn()
+        rows = conn.execute(
             """
             SELECT trace_id, MAX(start_time) as latest
             FROM spans
@@ -142,7 +172,8 @@ class SQLiteStorage(BaseStorage):
         return [row["trace_id"] for row in rows]
 
     def delete_old_traces(self, keep: int) -> None:
-        rows = self._conn.execute(
+        conn = self._get_conn()
+        rows = conn.execute(
             """
             SELECT trace_id FROM (
                 SELECT trace_id, MAX(start_time) as latest
@@ -153,7 +184,7 @@ class SQLiteStorage(BaseStorage):
             (keep,),
         ).fetchall()
         for row in rows:
-            self._conn.execute("DELETE FROM spans WHERE trace_id=?", (row["trace_id"],))
+            conn.execute("DELETE FROM spans WHERE trace_id=?", (row["trace_id"],))
 
     def clear(self) -> None:
-        self._conn.execute("DELETE FROM spans")
+        self._get_conn().execute("DELETE FROM spans")

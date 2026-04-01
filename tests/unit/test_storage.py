@@ -1,3 +1,6 @@
+import asyncio
+
+import anyio
 import pytest
 import time
 from datetime import datetime, timezone
@@ -86,3 +89,20 @@ def test_delete_old_traces_keeps_newest(storage, make_span):
     storage.delete_old_traces(keep=2)
     remaining = storage.list_traces(limit=10)
     assert len(remaining) == 2
+
+
+async def test_storage_methods_work_from_worker_thread(storage, make_span):
+    storage.save_span(make_span(trace_id="t1", span_id="s1"))
+
+    traces = await asyncio.wait_for(
+        anyio.to_thread.run_sync(storage.list_traces, 10),
+        timeout=2,
+    )
+    spans = await asyncio.wait_for(
+        anyio.to_thread.run_sync(storage.get_trace, "t1"),
+        timeout=2,
+    )
+
+    assert traces == ["t1"]
+    assert len(spans) == 1
+    assert spans[0].span_id == "s1"

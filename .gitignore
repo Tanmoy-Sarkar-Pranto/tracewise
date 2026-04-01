@@ -36,6 +36,7 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+.codex
 
 # OS
 .DS_Store
