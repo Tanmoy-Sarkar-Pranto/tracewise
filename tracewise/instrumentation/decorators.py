@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from tracewise.core.context import get_current_span, reset_span, set_current_span
 from tracewise.core.models import Span, SpanKind, SpanStatus
+from tracewise.instrumentation.middleware import _record_exception
 
 # Set by tracewise.init()
 _storage = None
@@ -50,6 +51,7 @@ def trace_span(name: str, attributes: dict | Callable | None = None):
             except Exception as exc:
                 span.status = SpanStatus.ERROR
                 span.attributes["error.message"] = str(exc)
+                _record_exception(span, exc)
                 raise
             finally:
                 span.end_time = _utcnow()
@@ -87,6 +89,7 @@ def trace_span(name: str, attributes: dict | Callable | None = None):
             except Exception as exc:
                 span.status = SpanStatus.ERROR
                 span.attributes["error.message"] = str(exc)
+                _record_exception(span, exc)
                 raise
             finally:
                 span.end_time = _utcnow()

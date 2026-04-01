@@ -127,3 +127,61 @@ async def test_decorator_span_is_closed(app):
     spans = storage.get_trace(storage.list_traces()[0])
     child = next(s for s in spans if s.name == "quick.op")
     assert child.end_time is not None
+
+
+async def test_decorator_async_records_exception_event(app):
+    _app, storage = app
+
+    @trace_span("async.fail")
+    async def fail():
+        raise ValueError("async error")
+
+    @_app.get("/async-fail")
+    async def route():
+        try:
+            await fail()
+        except ValueError:
+            pass
+        return {}
+
+    async with AsyncClient(transport=ASGITransport(app=_app), base_url="http://test") as client:
+        await client.get("/async-fail")
+
+    spans = storage.get_trace(storage.list_traces()[0])
+    child = next(s for s in spans if s.name == "async.fail")
+    assert len(child.events) == 1
+    event = child.events[0]
+    assert event.name == "exception"
+    assert event.attributes["exception.type"] == "ValueError"
+    assert event.attributes["exception.message"] == "async error"
+    assert "Traceback" in event.attributes["exception.stacktrace"]
+    assert "ValueError" in event.attributes["exception.stacktrace"]
+
+
+def test_decorator_sync_records_exception_event(tmp_path):
+    from tracewise.instrumentation import decorators as _dec
+    from tracewise.storage.sqlite import SQLiteStorage as _S
+    _storage = _S(db_path=tmp_path / "sync_test.db")
+    _dec._storage = _storage
+
+    try:
+        @trace_span("sync.fail")
+        def fail():
+            raise TypeError("sync error")
+
+        try:
+            fail()
+        except TypeError:
+            pass
+
+        spans = _storage.get_trace(_storage.list_traces()[0])
+        child = next(s for s in spans if s.name == "sync.fail")
+        assert len(child.events) == 1
+        event = child.events[0]
+        assert event.name == "exception"
+        assert event.attributes["exception.type"] == "TypeError"
+        assert event.attributes["exception.message"] == "sync error"
+        assert "Traceback" in event.attributes["exception.stacktrace"]
+        assert "TypeError" in event.attributes["exception.stacktrace"]
+    finally:
+        _dec._storage = None
