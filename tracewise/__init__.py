@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from tracewise.core.context import get_current_span as _get_current_span
 from tracewise.core.context import reset_span, set_current_span
-from tracewise.core.models import Span, SpanKind, SpanStatus
+from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.instrumentation import decorators as _decorators
 
 _storage = None
@@ -51,6 +51,29 @@ def get_current_span() -> Span | None:
     return _get_current_span()
 
 
+def set_attribute(key: str, value) -> None:
+    span = _get_current_span()
+    if span is not None:
+        span.attributes[key] = value
+
+
+def set_attributes(attrs: dict) -> None:
+    span = _get_current_span()
+    if span is not None:
+        span.attributes.update(attrs)
+
+
+def add_event(name: str, **attributes) -> None:
+    from datetime import datetime, timezone
+    span = _get_current_span()
+    if span is not None:
+        span.events.append(SpanEvent(
+            name=name,
+            timestamp=datetime.now(timezone.utc),
+            attributes=attributes,
+        ))
+
+
 @asynccontextmanager
 async def start_span(name: str, **attributes) -> AsyncIterator[Span]:
     if _storage is None:
@@ -89,4 +112,5 @@ async def start_span(name: str, **attributes) -> AsyncIterator[Span]:
 
 from tracewise.instrumentation.decorators import trace_span  # noqa: E402
 
-__all__ = ["init", "get_current_span", "start_span", "trace_span"]
+__all__ = ["init", "get_current_span", "start_span", "trace_span",
+           "set_attribute", "set_attributes", "add_event"]
