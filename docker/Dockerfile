@@ -8,8 +8,8 @@ ENV UV_LINK_MODE=copy
 
 # Create non-root user, /app, and /opt/venv — all as root, then hand over
 RUN useradd -m -u 1000 appuser \
-    && mkdir -p /app /opt/venv \
-    && chown appuser:appuser /app /opt/venv
+    && mkdir -p /app /opt/venv /home/appuser/.tracewise \
+    && chown -R appuser:appuser /app /opt/venv /home/appuser
 
 USER appuser
 WORKDIR /app
