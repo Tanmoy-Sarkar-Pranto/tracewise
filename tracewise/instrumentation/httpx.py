@@ -4,11 +4,11 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
-from uuid import uuid4
 
 import httpx
 
 from tracewise.core.context import get_current_span, reset_span, set_current_span
+from tracewise.core.ids import generate_span_id, generate_trace_id
 from tracewise.core.models import Span, SpanKind, SpanStatus
 from tracewise.instrumentation.middleware import _record_exception
 from tracewise.storage.base import BaseStorage
@@ -28,8 +28,8 @@ def _build_client_span(request: httpx.Request, client_class: str) -> Span:
     method = request.method.upper()
     host = request.url.host or "unknown"
     return Span(
-        trace_id=parent.trace_id if parent else uuid4().hex,
-        span_id=uuid4().hex,
+        trace_id=parent.trace_id if parent else generate_trace_id(),
+        span_id=generate_span_id(),
         parent_span_id=parent.span_id if parent else None,
         name=f"HTTP {method} {host}",
         kind=SpanKind.CLIENT,

@@ -4,12 +4,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
-from uuid import uuid4
 
 from fastapi import FastAPI
 
 from tracewise.core.context import get_current_span as _get_current_span
 from tracewise.core.context import reset_span, set_current_span
+from tracewise.core.ids import generate_span_id, generate_trace_id
 from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.instrumentation import decorators as _decorators
 from tracewise.instrumentation.middleware import _record_exception
@@ -115,8 +115,8 @@ async def start_span(name: str, **attributes) -> AsyncIterator[Span]:
 
     parent = _get_current_span()
     span = Span(
-        trace_id=parent.trace_id if parent else uuid4().hex,
-        span_id=uuid4().hex,
+        trace_id=parent.trace_id if parent else generate_trace_id(),
+        span_id=generate_span_id(),
         parent_span_id=parent.span_id if parent else None,
         name=name,
         kind=SpanKind.INTERNAL,

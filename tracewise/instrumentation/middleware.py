@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import traceback
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
 from tracewise.core.context import reset_span, set_current_span
+from tracewise.core.ids import generate_span_id, generate_trace_id
 from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
 from tracewise.storage.base import BaseStorage
 
@@ -40,8 +40,8 @@ class TraceWiseMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         span = Span(
-            trace_id=uuid4().hex,
-            span_id=uuid4().hex,
+            trace_id=generate_trace_id(),
+            span_id=generate_span_id(),
             parent_span_id=None,
             name=f"{request.method} {request.url.path}",
             kind=SpanKind.SERVER,

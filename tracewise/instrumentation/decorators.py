@@ -4,9 +4,9 @@ import asyncio
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Callable
-from uuid import uuid4
 
 from tracewise.core.context import get_current_span, reset_span, set_current_span
+from tracewise.core.ids import generate_span_id, generate_trace_id
 from tracewise.core.models import Span, SpanKind, SpanStatus
 from tracewise.instrumentation.middleware import _record_exception
 
@@ -32,8 +32,8 @@ def trace_span(name: str, attributes: dict | Callable | None = None):
             else:
                 resolved_attrs = {}
             span = Span(
-                trace_id=parent.trace_id if parent else uuid4().hex,
-                span_id=uuid4().hex,
+                trace_id=parent.trace_id if parent else generate_trace_id(),
+                span_id=generate_span_id(),
                 parent_span_id=parent.span_id if parent else None,
                 name=name,
                 kind=SpanKind.INTERNAL,
@@ -70,8 +70,8 @@ def trace_span(name: str, attributes: dict | Callable | None = None):
             else:
                 resolved_attrs = {}
             span = Span(
-                trace_id=parent.trace_id if parent else uuid4().hex,
-                span_id=uuid4().hex,
+                trace_id=parent.trace_id if parent else generate_trace_id(),
+                span_id=generate_span_id(),
                 parent_span_id=parent.span_id if parent else None,
                 name=name,
                 kind=SpanKind.INTERNAL,
