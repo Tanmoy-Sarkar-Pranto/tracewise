@@ -17,6 +17,8 @@ _original_asyncclient_send = None
 _original_client_send = None
 _should_trace_httpx: Callable[[], bool] = lambda: False
 _get_storage: Callable[[], BaseStorage | None] = lambda: None
+_TRACEPARENT_VERSION = "00"
+_TRACEPARENT_FLAGS = "01"
 
 
 def _utcnow() -> datetime:
@@ -43,6 +45,18 @@ def _build_client_span(request: httpx.Request, client_class: str) -> Span:
             "http.client_class": client_class,
         },
     )
+
+
+def _build_traceparent(span: Span) -> str:
+    return f"{_TRACEPARENT_VERSION}-{span.trace_id}-{span.span_id}-{_TRACEPARENT_FLAGS}"
+
+
+def _inject_traceparent_if_missing(request: httpx.Request, span: Span) -> None:
+    # Preserve caller-supplied propagation exactly; wire-level traceparent may
+    # intentionally differ from this locally recorded CLIENT span context.
+    if "traceparent" in request.headers:
+        return
+    request.headers["traceparent"] = _build_traceparent(span)
 
 
 def _begin_client_span(
@@ -104,6 +118,8 @@ def install_httpx_instrumentation(
             if storage is None or span is None or token is None:
                 return await original_async_send(client, request, *args, **kwargs)
 
+            _inject_traceparent_if_missing(request, span)
+
             try:
                 response = await original_async_send(client, request, *args, **kwargs)
                 _mark_client_span_success(span, response)
@@ -130,6 +146,8 @@ def install_httpx_instrumentation(
             storage, span, token = _begin_client_span(request, "Client")
             if storage is None or span is None or token is None:
                 return original_client_send(client, request, *args, **kwargs)
+
+            _inject_traceparent_if_missing(request, span)
 
             try:
                 response = original_client_send(client, request, *args, **kwargs)

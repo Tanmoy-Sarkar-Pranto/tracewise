@@ -6,6 +6,10 @@ Run with:
 
 Then visit:
     http://localhost:8000/health          — simple route
+    http://localhost:8000/echo-traceparent — echoes inbound traceparent header
+    http://localhost:8000/proxy-traceparent — async outbound traceparent demo
+    http://localhost:8000/proxy-traceparent-sync — sync outbound traceparent demo
+    http://localhost:8000/proxy-traceparent-custom — preserves caller traceparent
     http://localhost:8000/users           — list with child span + log event
     http://localhost:8000/users/42        — path param + decorated function
     http://localhost:8000/orders          — POST with two child spans
@@ -19,7 +23,7 @@ from datetime import datetime
 
 import httpx
 import tracewise
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -31,6 +35,36 @@ tracewise.init(app, capture_logs=logging.INFO, instrument_httpx=True)
 @app.get("/health")
 async def health():
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+
+@app.get("/echo-traceparent")
+async def echo_traceparent(request: Request):
+    return {"traceparent": request.headers.get("traceparent")}
+
+
+@app.get("/proxy-traceparent")
+async def proxy_traceparent():
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:8000") as client:
+        response = await client.get("/echo-traceparent")
+    return response.json()
+
+
+@app.get("/proxy-traceparent-sync")
+def proxy_traceparent_sync():
+    with httpx.Client(base_url="http://127.0.0.1:8000") as client:
+        response = client.get("/echo-traceparent")
+    return response.json()
+
+
+@app.get("/proxy-traceparent-custom")
+async def proxy_traceparent_custom():
+    existing = "00-11111111111111111111111111111111-2222222222222222-01"
+    async with httpx.AsyncClient(base_url="http://127.0.0.1:8000") as client:
+        response = await client.get(
+            "/echo-traceparent",
+            headers={"traceparent": existing},
+        )
+    return response.json()
 
 
 @app.get("/proxy-health")

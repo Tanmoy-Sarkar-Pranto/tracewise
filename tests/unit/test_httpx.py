@@ -1,10 +1,19 @@
 import httpx
 import pytest
+import re
 from fastapi import FastAPI
+from fastapi import Request
 
 import tracewise
 from tracewise.core.models import SpanKind, SpanStatus
 from tracewise.instrumentation import httpx as tracewise_httpx
+
+TRACEPARENT_RE = re.compile(r"^00-[0-9a-f]{32}-[0-9a-f]{16}-01$")
+
+
+def parse_traceparent(value: str) -> tuple[str, str, str, str]:
+    version, trace_id, parent_id, flags = value.split("-")
+    return version, trace_id, parent_id, flags
 
 
 def test_httpx_patch_is_not_installed_when_opted_out(tmp_path):
@@ -220,6 +229,159 @@ async def test_httpx_instrumentation_is_idempotent(tmp_path):
     spans = tracewise._storage.get_trace(trace_id)
     client_spans = [span for span in spans if span.kind == SpanKind.CLIENT]
     assert len(client_spans) == 1
+
+
+async def test_async_httpx_injects_traceparent_from_client_span(tmp_path):
+    upstream = FastAPI()
+
+    @upstream.get("/headers")
+    async def headers(request: Request):
+        return {"traceparent": request.headers.get("traceparent")}
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "async_traceparent.db"), instrument_httpx=True)
+
+    async with tracewise.start_span("parent.work"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=upstream),
+            base_url="https://upstream.test",
+        ) as client:
+            response = await client.get("/headers")
+
+    header = response.json()["traceparent"]
+    assert TRACEPARENT_RE.fullmatch(header)
+
+    spans = tracewise._storage.get_trace(tracewise._storage.list_traces()[0])
+    child = next(span for span in spans if span.kind == SpanKind.CLIENT)
+    version, trace_id, parent_id, flags = parse_traceparent(header)
+
+    assert version == "00"
+    assert trace_id == child.trace_id
+    assert parent_id == child.span_id
+    assert flags == "01"
+
+
+def test_sync_httpx_root_request_injects_traceparent(tmp_path):
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "sync_traceparent.db"), instrument_httpx=True)
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"traceparent": request.headers.get("traceparent")},
+            request=request,
+        )
+    )
+
+    with httpx.Client(
+        transport=transport,
+        base_url="https://sync.example.test",
+    ) as client:
+        response = client.get("/headers")
+
+    header = response.json()["traceparent"]
+    assert TRACEPARENT_RE.fullmatch(header)
+
+    span = tracewise._storage.get_trace(tracewise._storage.list_traces()[0])[0]
+    version, trace_id, parent_id, flags = parse_traceparent(header)
+
+    assert version == "00"
+    assert trace_id == span.trace_id
+    assert parent_id == span.span_id
+    assert flags == "01"
+
+
+async def test_httpx_preserves_existing_traceparent(tmp_path):
+    upstream = FastAPI()
+
+    @upstream.get("/headers")
+    async def headers(request: Request):
+        return {"traceparent": request.headers.get("traceparent")}
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "preserve_valid.db"), instrument_httpx=True)
+
+    existing = "00-11111111111111111111111111111111-2222222222222222-01"
+
+    async with tracewise.start_span("parent.work") as parent:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=upstream),
+            base_url="https://upstream.test",
+        ) as client:
+            response = await client.get("/headers", headers={"traceparent": existing})
+
+    assert response.json()["traceparent"] == existing
+    spans = tracewise._storage.get_trace(tracewise._storage.list_traces()[0])
+    child = next(span for span in spans if span.kind == SpanKind.CLIENT)
+    assert child.parent_span_id == parent.span_id
+
+
+def test_sync_httpx_preserves_existing_traceparent_and_records_local_span(tmp_path):
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "preserve_valid_sync.db"), instrument_httpx=True)
+
+    existing = "00-11111111111111111111111111111111-2222222222222222-01"
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"traceparent": request.headers.get("traceparent")},
+            request=request,
+        )
+    )
+
+    with httpx.Client(
+        transport=transport,
+        base_url="https://sync.example.test",
+    ) as client:
+        response = client.get("/headers", headers={"traceparent": existing})
+
+    assert response.json()["traceparent"] == existing
+    spans = tracewise._storage.get_trace(tracewise._storage.list_traces()[0])
+    assert any(span.kind == SpanKind.CLIENT for span in spans)
+
+
+async def test_httpx_preserves_malformed_traceparent(tmp_path):
+    upstream = FastAPI()
+
+    @upstream.get("/headers")
+    async def headers(request: Request):
+        return {"traceparent": request.headers.get("traceparent")}
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "preserve_bad.db"), instrument_httpx=True)
+
+    malformed = "not-a-valid-traceparent"
+
+    async with tracewise.start_span("parent.work") as parent:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=upstream),
+            base_url="https://upstream.test",
+        ) as client:
+            response = await client.get("/headers", headers={"traceparent": malformed})
+
+    assert response.json()["traceparent"] == malformed
+    spans = tracewise._storage.get_trace(tracewise._storage.list_traces()[0])
+    child = next(span for span in spans if span.kind == SpanKind.CLIENT)
+    assert child.parent_span_id == parent.span_id
+
+
+async def test_httpx_opt_out_does_not_inject_traceparent(tmp_path):
+    upstream = FastAPI()
+
+    @upstream.get("/headers")
+    async def headers(request: Request):
+        return {"traceparent": request.headers.get("traceparent")}
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "no_traceparent.db"), instrument_httpx=False)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=upstream),
+        base_url="https://upstream.test",
+    ) as client:
+        response = await client.get("/headers")
+
+    assert response.json()["traceparent"] is None
 
 
 def test_httpx_reset_unpatches_client_and_asyncclient_send(tmp_path):
