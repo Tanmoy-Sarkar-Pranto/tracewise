@@ -1,12 +1,31 @@
 [project]
 name = "tracewise"
 version = "0.1.0"
+description = "Local tracing and debugging for FastAPI apps"
+readme = "README.md"
 requires-python = ">=3.11"
+keywords = ["fastapi", "tracing", "debugging", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Debuggers",
+]
 dependencies = [
     "fastapi>=0.100.0,<1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Tanmoy-Sarkar-Pranto/tracewise"
+Repository = "https://github.com/Tanmoy-Sarkar-Pranto/tracewise"
+
 [project.optional-dependencies]
+httpx = [
+    "httpx",
+]
 dev = [
     "uvicorn[standard]",
     "httpx",

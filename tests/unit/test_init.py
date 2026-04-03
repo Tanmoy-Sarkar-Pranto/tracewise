@@ -1,3 +1,4 @@
+import builtins
 import logging
 
 import httpx
@@ -77,6 +78,23 @@ def test_init_opt_out_after_opt_in_unpatches_httpx(tmp_path):
 def test_init_mounts_viewer_route(tmp_path):
     app = FastAPI()
     tracewise.init(app, db_path=str(tmp_path / "t.db"))
+    paths = [str(getattr(r, "path", "")) for r in app.routes]
+    assert any("tracewise" in p for p in paths)
+
+
+def test_init_does_not_require_httpx_when_httpx_instrumentation_disabled(tmp_path, monkeypatch):
+    original_import = builtins.__import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tracewise.instrumentation.httpx":
+            raise ModuleNotFoundError("No module named 'httpx'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), instrument_httpx=False)
+
     paths = [str(getattr(r, "path", "")) for r in app.routes]
     assert any("tracewise" in p for p in paths)
 

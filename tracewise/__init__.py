@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import AsyncIterator
 
 from fastapi import FastAPI
@@ -16,6 +17,13 @@ from tracewise.instrumentation.middleware import _record_exception
 
 _storage = None
 _httpx_instrumentation_enabled = False
+
+
+def _reset_httpx_instrumentation_if_loaded() -> None:
+    module = sys.modules.get("tracewise.instrumentation.httpx")
+    if module is None:
+        return
+    module.reset_httpx_instrumentation()
 
 
 def init(
@@ -32,21 +40,19 @@ def init(
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
     if not (enabled and env_enabled):
-        from tracewise.instrumentation.httpx import reset_httpx_instrumentation
-
         _storage = None
         _decorators._storage = None
         _httpx_instrumentation_enabled = False
-        reset_httpx_instrumentation()
+        _reset_httpx_instrumentation_if_loaded()
         return
 
     from tracewise.storage.sqlite import SQLiteStorage
-    from tracewise.instrumentation.httpx import (
-        install_httpx_instrumentation,
-        reset_httpx_instrumentation,
-    )
     from tracewise.instrumentation.middleware import TraceWiseMiddleware
     from tracewise.viewer.app import create_viewer_app
+
+    install_httpx_instrumentation = None
+    if instrument_httpx:
+        from tracewise.instrumentation.httpx import install_httpx_instrumentation
 
     if db_path is None:
         db_path = str(Path.home() / ".tracewise" / "traces.db")
@@ -74,7 +80,7 @@ def init(
             get_storage=lambda: _storage,
         )
     else:
-        reset_httpx_instrumentation()
+        _reset_httpx_instrumentation_if_loaded()
 
 
 def get_current_span() -> Span | None:
