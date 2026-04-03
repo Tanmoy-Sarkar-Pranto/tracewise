@@ -10,6 +10,7 @@ from starlette.responses import Response
 from tracewise.core.context import reset_span, set_current_span
 from tracewise.core.ids import generate_span_id, generate_trace_id
 from tracewise.core.models import Span, SpanEvent, SpanKind, SpanStatus
+from tracewise.core.traceparent import parse_traceparent
 from tracewise.storage.base import BaseStorage
 
 
@@ -29,6 +30,25 @@ def _record_exception(span: Span, exc: Exception) -> None:
     ))
 
 
+def _build_request_span(request: Request) -> Span:
+    inbound = parse_traceparent(request.headers.get("traceparent"))
+
+    return Span(
+        trace_id=inbound.trace_id if inbound else generate_trace_id(),
+        span_id=generate_span_id(),
+        parent_span_id=inbound.parent_id if inbound else None,
+        name=f"{request.method} {request.url.path}",
+        kind=SpanKind.SERVER,
+        start_time=_utcnow(),
+        end_time=None,
+        status=SpanStatus.UNSET,
+        attributes={
+            "http.method": request.method,
+            "http.url": str(request.url),
+        },
+    )
+
+
 class TraceWiseMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, storage: BaseStorage, skip_prefixes: list[str] | None = None, **kwargs):
         super().__init__(app, **kwargs)
@@ -39,20 +59,7 @@ class TraceWiseMiddleware(BaseHTTPMiddleware):
         if any(request.url.path.startswith(p) for p in self._skip_prefixes):
             return await call_next(request)
 
-        span = Span(
-            trace_id=generate_trace_id(),
-            span_id=generate_span_id(),
-            parent_span_id=None,
-            name=f"{request.method} {request.url.path}",
-            kind=SpanKind.SERVER,
-            start_time=_utcnow(),
-            end_time=None,
-            status=SpanStatus.UNSET,
-            attributes={
-                "http.method": request.method,
-                "http.url": str(request.url),
-            },
-        )
+        span = _build_request_span(request)
         query_string = request.url.query
         if query_string:
             span.attributes["http.query_string"] = query_string

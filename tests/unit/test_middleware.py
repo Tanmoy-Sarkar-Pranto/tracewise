@@ -6,6 +6,10 @@ from tracewise.core.models import SpanStatus
 from tracewise.instrumentation.middleware import TraceWiseMiddleware
 from tracewise.storage.sqlite import SQLiteStorage
 
+VALID_TRACEPARENT = "00-11111111111111111111111111111111-2222222222222222-01"
+VALID_TRACEPARENT_FLAGS_00 = "00-11111111111111111111111111111111-2222222222222222-00"
+UNSUPPORTED_TRACEPARENT = "01-11111111111111111111111111111111-2222222222222222-01"
+
 
 @pytest.fixture
 def storage(tmp_path):
@@ -142,3 +146,63 @@ async def test_route_template_is_captured(app, storage):
 
     span = storage.get_trace(storage.list_traces()[0])[0]
     assert span.attributes["http.route"] == "/users/{user_id}"
+
+
+async def test_middleware_adopts_valid_inbound_traceparent(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/hello", headers={"traceparent": VALID_TRACEPARENT})
+
+    traces = storage.list_traces()
+    assert traces == ["11111111111111111111111111111111"]
+
+    span = storage.get_trace(traces[0])[0]
+    assert span.trace_id == "11111111111111111111111111111111"
+    assert span.parent_span_id == "2222222222222222"
+    assert span.span_id != "2222222222222222"
+    assert span.name == "GET /hello"
+
+
+async def test_middleware_accepts_valid_inbound_traceparent_with_flags_00(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/hello", headers={"traceparent": VALID_TRACEPARENT_FLAGS_00})
+
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.trace_id == "11111111111111111111111111111111"
+    assert span.parent_span_id == "2222222222222222"
+
+
+async def test_middleware_ignores_malformed_traceparent(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/hello", headers={"traceparent": "not-a-valid-traceparent"})
+
+    traces = storage.list_traces()
+    assert traces != ["11111111111111111111111111111111"]
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.parent_span_id is None
+
+
+async def test_middleware_ignores_unsupported_traceparent_version(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/hello", headers={"traceparent": UNSUPPORTED_TRACEPARENT})
+
+    traces = storage.list_traces()
+    assert traces != ["11111111111111111111111111111111"]
+    span = storage.get_trace(storage.list_traces()[0])[0]
+    assert span.parent_span_id is None
+
+
+async def test_middleware_generates_fresh_request_span_ids_for_same_inbound_traceparent(app, storage):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/hello", headers={"traceparent": VALID_TRACEPARENT})
+        await client.get("/hello", headers={"traceparent": VALID_TRACEPARENT})
+
+    traces = storage.list_traces()
+    assert traces == ["11111111111111111111111111111111"]
+
+    spans = storage.get_trace(traces[0])
+    assert len(spans) == 2
+    assert spans[0].trace_id == "11111111111111111111111111111111"
+    assert spans[1].trace_id == "11111111111111111111111111111111"
+    assert spans[0].span_id != spans[1].span_id
+    assert spans[0].parent_span_id == "2222222222222222"
+    assert spans[1].parent_span_id == "2222222222222222"
