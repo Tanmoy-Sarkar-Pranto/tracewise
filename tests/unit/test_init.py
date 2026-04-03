@@ -10,6 +10,7 @@ import tracewise
 from tracewise.core.models import SpanStatus
 from tracewise.instrumentation import decorators as _decorators
 from tracewise.instrumentation.logging import TraceWiseLogHandler
+from tracewise.instrumentation.middleware import TraceWiseMiddleware
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +81,33 @@ def test_init_mounts_viewer_route(tmp_path):
     tracewise.init(app, db_path=str(tmp_path / "t.db"))
     paths = [str(getattr(r, "path", "")) for r in app.routes]
     assert any("tracewise" in p for p in paths)
+
+
+def test_init_is_idempotent_for_same_app(tmp_path):
+    app = FastAPI()
+
+    tracewise.init(app, db_path=str(tmp_path / "t.db"))
+    tracewise.init(app, db_path=str(tmp_path / "t.db"))
+
+    middleware = [m for m in app.user_middleware if m.cls is TraceWiseMiddleware]
+    mounts = [r for r in app.routes if getattr(r, "path", None) == "/tracewise"]
+
+    assert len(middleware) == 1
+    assert len(mounts) == 1
+
+
+def test_init_capture_logs_is_idempotent(tmp_path):
+    app = FastAPI()
+
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), capture_logs=True)
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), capture_logs=True)
+
+    handlers = [h for h in logging.getLogger().handlers if isinstance(h, TraceWiseLogHandler)]
+
+    assert len(handlers) == 1
+
+    for handler in handlers:
+        logging.getLogger().removeHandler(handler)
 
 
 def test_init_does_not_require_httpx_when_httpx_instrumentation_disabled(tmp_path, monkeypatch):

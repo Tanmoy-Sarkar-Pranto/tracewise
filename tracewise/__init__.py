@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import logging
 from pathlib import Path
 import sys
 from typing import AsyncIterator
@@ -17,6 +18,8 @@ from tracewise.instrumentation.middleware import _record_exception
 
 _storage = None
 _httpx_instrumentation_enabled = False
+_APP_STORAGE_ATTR = "_tracewise_storage"
+_VIEWER_MOUNT_PATH = "/tracewise"
 
 
 def _reset_httpx_instrumentation_if_loaded() -> None:
@@ -24,6 +27,44 @@ def _reset_httpx_instrumentation_if_loaded() -> None:
     if module is None:
         return
     module.reset_httpx_instrumentation()
+
+
+def _get_or_create_app_storage(app: FastAPI, db_path: str | None, max_traces: int):
+    storage = getattr(app.state, _APP_STORAGE_ATTR, None)
+    if storage is not None:
+        return storage
+
+    if db_path is None:
+        db_path = str(Path.home() / ".tracewise" / "traces.db")
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    from tracewise.storage.sqlite import SQLiteStorage
+
+    storage = SQLiteStorage(db_path=db_path, max_traces=max_traces)
+    setattr(app.state, _APP_STORAGE_ATTR, storage)
+    return storage
+
+
+def _app_has_tracewise_middleware(app: FastAPI) -> bool:
+    from tracewise.instrumentation.middleware import TraceWiseMiddleware
+
+    return any(getattr(middleware, "cls", None) is TraceWiseMiddleware for middleware in app.user_middleware)
+
+
+def _app_has_tracewise_viewer_mount(app: FastAPI) -> bool:
+    return any(getattr(route, "path", None) == _VIEWER_MOUNT_PATH for route in app.routes)
+
+
+def _ensure_log_handler(level: int) -> None:
+    from tracewise.instrumentation.logging import TraceWiseLogHandler
+
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        if isinstance(handler, TraceWiseLogHandler):
+            handler.setLevel(level)
+            return
+
+    root_logger.addHandler(TraceWiseLogHandler(level=level))
 
 
 def init(
@@ -46,7 +87,6 @@ def init(
         _reset_httpx_instrumentation_if_loaded()
         return
 
-    from tracewise.storage.sqlite import SQLiteStorage
     from tracewise.instrumentation.middleware import TraceWiseMiddleware
     from tracewise.viewer.app import create_viewer_app
 
@@ -54,25 +94,20 @@ def init(
     if instrument_httpx:
         from tracewise.instrumentation.httpx import install_httpx_instrumentation
 
-    if db_path is None:
-        db_path = str(Path.home() / ".tracewise" / "traces.db")
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-
-    _storage = SQLiteStorage(db_path=db_path, max_traces=max_traces)
+    _storage = _get_or_create_app_storage(app, db_path, max_traces)
     _httpx_instrumentation_enabled = instrument_httpx
     _decorators._storage = _storage
 
-    app.add_middleware(TraceWiseMiddleware, storage=_storage, skip_prefixes=["/tracewise"])
+    if not _app_has_tracewise_middleware(app):
+        app.add_middleware(TraceWiseMiddleware, storage=_storage, skip_prefixes=[_VIEWER_MOUNT_PATH])
 
-    viewer = create_viewer_app(storage=_storage)
-    app.mount("/tracewise", viewer)
+    if not _app_has_tracewise_viewer_mount(app):
+        viewer = create_viewer_app(storage=_storage)
+        app.mount(_VIEWER_MOUNT_PATH, viewer)
 
     if capture_logs is not False:
-        import logging
-        from tracewise.instrumentation.logging import TraceWiseLogHandler
         level = logging.NOTSET if capture_logs is True else capture_logs
-        handler = TraceWiseLogHandler(level=level)
-        logging.getLogger().addHandler(handler)
+        _ensure_log_handler(level)
 
     if instrument_httpx:
         install_httpx_instrumentation(
