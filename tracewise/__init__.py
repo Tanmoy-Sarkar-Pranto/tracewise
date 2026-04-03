@@ -67,6 +67,36 @@ def _ensure_log_handler(level: int) -> None:
     root_logger.addHandler(TraceWiseLogHandler(level=level))
 
 
+def _remove_log_handlers() -> None:
+    from tracewise.instrumentation.logging import TraceWiseLogHandler
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, TraceWiseLogHandler):
+            root_logger.removeHandler(handler)
+
+
+def _disable_tracewise_for_app(app: FastAPI) -> None:
+    from tracewise.instrumentation.middleware import TraceWiseMiddleware
+
+    original_middleware_count = len(app.user_middleware)
+    app.user_middleware = [
+        middleware
+        for middleware in app.user_middleware
+        if getattr(middleware, "cls", None) is not TraceWiseMiddleware
+    ]
+
+    original_route_count = len(app.router.routes)
+    app.router.routes = [
+        route for route in app.router.routes if getattr(route, "path", None) != _VIEWER_MOUNT_PATH
+    ]
+
+    _remove_log_handlers()
+
+    if len(app.user_middleware) != original_middleware_count or len(app.router.routes) != original_route_count:
+        app.middleware_stack = None
+
+
 def init(
     app: FastAPI,
     *,
@@ -81,6 +111,7 @@ def init(
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
     if not (enabled and env_enabled):
+        _disable_tracewise_for_app(app)
         _storage = None
         _decorators._storage = None
         _httpx_instrumentation_enabled = False
@@ -99,6 +130,7 @@ def init(
     _decorators._storage = _storage
 
     if not _app_has_tracewise_middleware(app):
+        app.middleware_stack = None
         app.add_middleware(TraceWiseMiddleware, storage=_storage, skip_prefixes=[_VIEWER_MOUNT_PATH])
 
     if not _app_has_tracewise_viewer_mount(app):

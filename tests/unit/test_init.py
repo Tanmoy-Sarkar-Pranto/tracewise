@@ -26,6 +26,73 @@ def test_init_disabled_does_not_mount_viewer(tmp_path):
     assert not any("/tracewise" in p for p in paths)
 
 
+async def test_init_disabled_after_enable_stops_tracing_same_app(tmp_path):
+    app = FastAPI()
+    db_path = str(tmp_path / "t.db")
+    tracewise.init(app, db_path=db_path)
+
+    @app.get("/ping")
+    async def ping():
+        return {"pong": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/ping")
+
+    storage = getattr(app.state, "_tracewise_storage")
+    assert len(storage.list_traces()) == 1
+
+    tracewise.init(app, db_path=db_path, enabled=False)
+
+    middleware = [m for m in app.user_middleware if m.cls is TraceWiseMiddleware]
+    mounts = [r for r in app.routes if getattr(r, "path", None) == "/tracewise"]
+
+    assert tracewise._storage is None
+    assert _decorators._storage is None
+    assert len(middleware) == 0
+    assert len(mounts) == 0
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/ping")
+
+    assert len(storage.list_traces()) == 1
+
+
+async def test_init_can_reenable_after_disable_on_same_app(tmp_path):
+    app = FastAPI()
+    db_path = str(tmp_path / "t.db")
+    tracewise.init(app, db_path=db_path)
+
+    @app.get("/ping")
+    async def ping():
+        return {"pong": True}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/ping")
+
+    storage = getattr(app.state, "_tracewise_storage")
+    assert len(storage.list_traces()) == 1
+
+    tracewise.init(app, db_path=db_path, enabled=False)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/ping")
+
+    assert len(storage.list_traces()) == 1
+
+    tracewise.init(app, db_path=db_path)
+
+    middleware = [m for m in app.user_middleware if m.cls is TraceWiseMiddleware]
+    mounts = [r for r in app.routes if getattr(r, "path", None) == "/tracewise"]
+
+    assert len(middleware) == 1
+    assert len(mounts) == 1
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get("/ping")
+
+    assert len(storage.list_traces()) == 2
+
+
 def test_init_disabled_clears_state_and_unpatches_httpx(tmp_path):
     original_async_send = httpx.AsyncClient.send
     original_sync_send = httpx.Client.send
@@ -198,6 +265,19 @@ def test_capture_logs_with_level(tmp_path):
     assert handlers[0].level == logging.WARNING
     for h in handlers:
         logging.getLogger().removeHandler(h)
+
+
+def test_init_disabled_after_enable_removes_log_handler(tmp_path):
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), capture_logs=True)
+
+    handlers = [h for h in logging.getLogger().handlers if isinstance(h, TraceWiseLogHandler)]
+    assert len(handlers) == 1
+
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), enabled=False)
+
+    handlers = [h for h in logging.getLogger().handlers if isinstance(h, TraceWiseLogHandler)]
+    assert len(handlers) == 0
 
 
 async def test_capture_logs_end_to_end(tmp_path):
