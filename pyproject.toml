@@ -31,12 +31,16 @@ Repository = "https://github.com/Tanmoy-Sarkar-Pranto/tracewise"
 httpx = [
     "httpx",
 ]
+sqlalchemy = [
+    "sqlalchemy>=2.0,<3.0",
+]
 dev = [
     "uvicorn[standard]",
     "httpx",
     "pytest",
     "pytest-asyncio",
     "anyio",
+    "sqlalchemy>=2.0,<3.0",
 ]
 
 [build-system]

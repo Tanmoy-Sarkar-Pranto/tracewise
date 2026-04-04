@@ -194,6 +194,54 @@ def test_init_does_not_require_httpx_when_httpx_instrumentation_disabled(tmp_pat
     assert any("tracewise" in p for p in paths)
 
 
+def test_init_does_not_require_sqlalchemy_when_sqlalchemy_instrumentation_disabled(tmp_path, monkeypatch):
+    original_import = builtins.__import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tracewise.instrumentation.sqlalchemy":
+            raise ModuleNotFoundError("No module named 'sqlalchemy'")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), instrument_sqlalchemy=False)
+
+    paths = [str(getattr(r, "path", "")) for r in app.routes]
+    assert any("tracewise" in p for p in paths)
+
+
+def test_init_sqlalchemy_opt_in_installs_engine_listeners(tmp_path):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+    from tracewise.instrumentation import sqlalchemy as tracewise_sqlalchemy
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "t.db"), instrument_sqlalchemy=True)
+
+    assert tracewise._sqlalchemy_instrumentation_enabled is True
+    assert event.contains(Engine, "before_cursor_execute", tracewise_sqlalchemy._before_cursor_execute)
+    assert event.contains(Engine, "after_cursor_execute", tracewise_sqlalchemy._after_cursor_execute)
+    assert event.contains(Engine, "handle_error", tracewise_sqlalchemy._handle_error)
+
+
+def test_init_opt_out_after_sqlalchemy_opt_in_removes_engine_listeners(tmp_path):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+    from tracewise.instrumentation import sqlalchemy as tracewise_sqlalchemy
+
+    first_app = FastAPI()
+    tracewise.init(first_app, db_path=str(tmp_path / "first.db"), instrument_sqlalchemy=True)
+
+    second_app = FastAPI()
+    tracewise.init(second_app, db_path=str(tmp_path / "second.db"), instrument_sqlalchemy=False)
+
+    assert tracewise._sqlalchemy_instrumentation_enabled is False
+    assert not event.contains(Engine, "before_cursor_execute", tracewise_sqlalchemy._before_cursor_execute)
+    assert not event.contains(Engine, "after_cursor_execute", tracewise_sqlalchemy._after_cursor_execute)
+    assert not event.contains(Engine, "handle_error", tracewise_sqlalchemy._handle_error)
+
+
 async def test_init_wires_middleware_and_viewer(tmp_path):
     app = FastAPI()
     tracewise.init(app, db_path=str(tmp_path / "t.db"))

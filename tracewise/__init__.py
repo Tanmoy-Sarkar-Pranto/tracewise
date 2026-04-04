@@ -18,6 +18,7 @@ from tracewise.instrumentation.middleware import _record_exception
 
 _storage = None
 _httpx_instrumentation_enabled = False
+_sqlalchemy_instrumentation_enabled = False
 _APP_STORAGE_ATTR = "_tracewise_storage"
 _VIEWER_MOUNT_PATH = "/tracewise"
 
@@ -27,6 +28,13 @@ def _reset_httpx_instrumentation_if_loaded() -> None:
     if module is None:
         return
     module.reset_httpx_instrumentation()
+
+
+def _reset_sqlalchemy_instrumentation_if_loaded() -> None:
+    module = sys.modules.get("tracewise.instrumentation.sqlalchemy")
+    if module is None:
+        return
+    module.reset_sqlalchemy_instrumentation()
 
 
 def _get_or_create_app_storage(app: FastAPI, db_path: str | None, max_traces: int):
@@ -105,8 +113,9 @@ def init(
     enabled: bool = True,
     capture_logs: bool | int = False,
     instrument_httpx: bool = False,
+    instrument_sqlalchemy: bool = False,
 ) -> None:
-    global _storage, _httpx_instrumentation_enabled
+    global _storage, _httpx_instrumentation_enabled, _sqlalchemy_instrumentation_enabled
 
     import os
     env_enabled = os.environ.get("TRACEWISE_ENABLED", "true").lower() not in ("false", "0", "no")
@@ -115,7 +124,9 @@ def init(
         _storage = None
         _decorators._storage = None
         _httpx_instrumentation_enabled = False
+        _sqlalchemy_instrumentation_enabled = False
         _reset_httpx_instrumentation_if_loaded()
+        _reset_sqlalchemy_instrumentation_if_loaded()
         return
 
     from tracewise.instrumentation.middleware import TraceWiseMiddleware
@@ -125,8 +136,13 @@ def init(
     if instrument_httpx:
         from tracewise.instrumentation.httpx import install_httpx_instrumentation
 
+    install_sqlalchemy_instrumentation = None
+    if instrument_sqlalchemy:
+        from tracewise.instrumentation.sqlalchemy import install_sqlalchemy_instrumentation
+
     _storage = _get_or_create_app_storage(app, db_path, max_traces)
     _httpx_instrumentation_enabled = instrument_httpx
+    _sqlalchemy_instrumentation_enabled = instrument_sqlalchemy
     _decorators._storage = _storage
 
     if not _app_has_tracewise_middleware(app):
@@ -148,6 +164,14 @@ def init(
         )
     else:
         _reset_httpx_instrumentation_if_loaded()
+
+    if instrument_sqlalchemy:
+        install_sqlalchemy_instrumentation(
+            should_trace_sqlalchemy=lambda: _sqlalchemy_instrumentation_enabled,
+            get_storage=lambda: _storage,
+        )
+    else:
+        _reset_sqlalchemy_instrumentation_if_loaded()
 
 
 def get_current_span() -> Span | None:
