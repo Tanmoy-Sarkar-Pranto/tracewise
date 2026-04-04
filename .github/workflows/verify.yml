@@ -1,0 +1,46 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Build Docker app image
+        run: docker compose -f docker/docker-compose.yml build app
+
+      - name: Run Docker test suite
+        run: docker compose -f docker/docker-compose.yml run --rm app uv run pytest -v
+
+      - name: Build package artifacts
+        run: uv build
+
+      - name: Create artifact smoke-test environment
+        run: python -m venv .venv-artifact-smoke
+
+      - name: Install built wheel into smoke-test environment
+        run: .venv-artifact-smoke/bin/pip install dist/*.whl
+
+      - name: Smoke test built artifact
+        run: .venv-artifact-smoke/bin/python scripts/release/smoke_test_installed_package.py
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-artifacts
+          path: dist/*
