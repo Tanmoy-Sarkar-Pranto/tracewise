@@ -15,6 +15,7 @@ Current scope:
 - span attributes and events
 - optional log capture
 - optional `httpx` client tracing with `traceparent` propagation
+- optional SQLAlchemy DB tracing with raw `db.statement` capture
 - local SQLite storage and a minimal embedded UI
 
 This is aimed at local development and debugging. It is not trying to be a full
@@ -40,10 +41,34 @@ If you want `instrument_httpx=True`, install the optional extra:
 pip install -e ".[httpx]"
 ```
 
+If you want `instrument_sqlalchemy=True`, install the optional extra:
+
+```bash
+pip install -e ".[sqlalchemy]"
+```
+
+If you want both optional instrumentations from the Quick Start example:
+
+```bash
+pip install -e ".[httpx,sqlalchemy]"
+```
+
 For a published package install, the same extra would be:
 
 ```bash
 pip install "tracewise[httpx]"
+```
+
+For a published package install:
+
+```bash
+pip install "tracewise[sqlalchemy]"
+```
+
+For the published package with both optional instrumentations:
+
+```bash
+pip install "tracewise[httpx,sqlalchemy]"
 ```
 
 ## Quick Start
@@ -58,6 +83,7 @@ tracewise.init(
     app,
     capture_logs=True,
     instrument_httpx=True,
+    instrument_sqlalchemy=True,
 )
 
 
@@ -99,6 +125,8 @@ Main `init()` options:
   active span
 - `instrument_httpx`: record outbound `httpx` requests and inject
   `traceparent` headers
+- `instrument_sqlalchemy`: record SQLAlchemy statements as DB `CLIENT` spans
+  and capture raw `db.statement` text without parameter payloads
 
 If `db_path` is not provided, TraceWise stores data under
 `~/.tracewise/traces.db`.
@@ -123,9 +151,19 @@ Then open:
 
 - `http://localhost:8000/health`
 - `http://localhost:8000/users`
+- `http://localhost:8000/db-users`
 - `http://localhost:8000/orders`
 - `http://localhost:8000/error`
 - `http://localhost:8000/tracewise`
+
+To generate DB spans in the demo app:
+
+```bash
+curl http://localhost:8000/db-users
+curl -X POST http://localhost:8000/db-users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Charlie"}'
+```
 
 ## Current Limitations
 

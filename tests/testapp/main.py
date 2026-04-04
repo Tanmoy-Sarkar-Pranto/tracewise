@@ -13,6 +13,8 @@ Then visit:
     http://localhost:8000/users           — list with child span + log event
     http://localhost:8000/users/42        — path param + decorated function
     http://localhost:8000/orders          — POST with two child spans
+    http://localhost:8000/db-users        — async SQLAlchemy SELECT demo
+    http://localhost:8000/db-users        — POST sync SQLAlchemy INSERT demo
     http://localhost:8000/slow            — artificial delay
     http://localhost:8000/error           — raises exception
     http://localhost:8000/tracewise       — viewer UI
@@ -20,16 +22,54 @@ Then visit:
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 import tracewise
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 logger = logging.getLogger(__name__)
 
+_DEMO_DB_PATH = Path.home() / ".tracewise" / "demo.sqlite3"
+_SYNC_DB_URL = f"sqlite:///{_DEMO_DB_PATH}"
+_ASYNC_DB_URL = f"sqlite+aiosqlite:///{_DEMO_DB_PATH}"
+
+sync_db_engine = create_engine(_SYNC_DB_URL)
+async_db_engine = create_async_engine(_ASYNC_DB_URL)
+
+
+def _seed_demo_db() -> None:
+    _DEMO_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sync_db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS demo_users ("
+                "id INTEGER PRIMARY KEY, "
+                "name TEXT NOT NULL)"
+            )
+        )
+        existing = conn.execute(text("SELECT COUNT(*) FROM demo_users")).scalar_one()
+        if existing == 0:
+            conn.execute(
+                text(
+                    "INSERT INTO demo_users (name) VALUES "
+                    "('Alice'), ('Bob')"
+                )
+            )
+
+
+_seed_demo_db()
+
 app = FastAPI(title="TraceWise Test App")
-tracewise.init(app, capture_logs=logging.INFO, instrument_httpx=True)
+tracewise.init(
+    app,
+    capture_logs=logging.INFO,
+    instrument_httpx=True,
+    instrument_sqlalchemy=True,
+)
 
 
 @app.get("/health")
@@ -108,6 +148,10 @@ class OrderBody(BaseModel):
     quantity: int
 
 
+class DemoUserBody(BaseModel):
+    name: str
+
+
 @app.post("/orders")
 async def create_order(body: OrderBody):
     tracewise.set_attributes({"order.product": body.product, "order.quantity": body.quantity})
@@ -117,6 +161,23 @@ async def create_order(body: OrderBody):
     async with tracewise.start_span("db.insert", table="orders"):
         await asyncio.sleep(0.008)
     return {"order": "created", "product": body.product}
+
+
+@app.get("/db-users")
+async def list_db_users():
+    async with async_db_engine.connect() as conn:
+        result = await conn.execute(text("SELECT id, name FROM demo_users ORDER BY id"))
+        return {"users": [dict(row) for row in result.mappings().all()]}
+
+
+@app.post("/db-users")
+def create_db_user(body: DemoUserBody):
+    with sync_db_engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO demo_users (name) VALUES (:name)"),
+            {"name": body.name},
+        )
+    return {"created": body.name}
 
 
 @app.get("/slow")

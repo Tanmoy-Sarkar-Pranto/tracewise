@@ -1,3 +1,6 @@
+import importlib
+import sys
+
 import pytest
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
@@ -106,3 +109,83 @@ async def test_duration_ms_in_trace_list(viewer, storage, make_span):
 
     data = resp.json()
     assert abs(data[0]["root"]["duration_ms"] - 120) < 5
+
+
+async def test_testapp_db_users_routes_seed_and_trace_sqlalchemy(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    sys.modules.pop("tests.testapp.main", None)
+    module = importlib.import_module("tests.testapp.main")
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=module.app), base_url="http://test") as client:
+            response = await client.get("/db-users")
+            assert response.status_code == 200
+            assert response.json() == {
+                "users": [
+                    {"id": 1, "name": "Alice"},
+                    {"id": 2, "name": "Bob"},
+                ]
+            }
+
+            response = await client.post("/db-users", json={"name": "Charlie"})
+            assert response.status_code == 200
+            assert response.json() == {"created": "Charlie"}
+
+            response = await client.get("/db-users")
+            assert response.status_code == 200
+            assert response.json() == {
+                "users": [
+                    {"id": 1, "name": "Alice"},
+                    {"id": 2, "name": "Bob"},
+                    {"id": 3, "name": "Charlie"},
+                ]
+            }
+
+        storage = getattr(module.app.state, "_tracewise_storage")
+        trace_ids = storage.list_traces(limit=10)
+
+        get_trace_count = 0
+        post_trace_count = 0
+        for trace_id in trace_ids:
+            spans = storage.get_trace(trace_id)
+            request_span = next(
+                span
+                for span in spans
+                if span.kind == SpanKind.SERVER and span.attributes.get("http.route") == "/db-users"
+            )
+            db_children = [
+                span
+                for span in spans
+                if span.parent_span_id == request_span.span_id
+                and span.kind == SpanKind.CLIENT
+                and "db.statement" in span.attributes
+            ]
+
+            if request_span.name == "GET /db-users":
+                get_trace_count += 1
+                assert any(
+                    child.name == "SQL SELECT"
+                    and child.attributes["db.operation"] == "SELECT"
+                    for child in db_children
+                )
+
+            if request_span.name == "POST /db-users":
+                post_trace_count += 1
+                insert_child = next(
+                    child
+                    for child in db_children
+                    if child.name == "SQL INSERT"
+                    and child.attributes["db.operation"] == "INSERT"
+                )
+                assert "Charlie" not in insert_child.attributes["db.statement"]
+
+        assert get_trace_count == 2
+        assert post_trace_count == 1
+    finally:
+        async_engine = getattr(module, "async_db_engine", None)
+        if async_engine is not None:
+            await async_engine.dispose()
+
+        sync_engine = getattr(module, "sync_db_engine", None)
+        if sync_engine is not None:
+            sync_engine.dispose()
