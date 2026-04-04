@@ -1,5 +1,7 @@
 # TraceWise
 
+[![PyPI version](https://img.shields.io/pypi/v/tracewise.svg)](https://pypi.org/project/tracewise/)
+
 TraceWise is a small tracing and debugging tool for FastAPI apps.
 
 It records request spans to a local SQLite database and mounts a built-in viewer
