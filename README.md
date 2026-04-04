@@ -173,6 +173,17 @@ curl -X POST http://localhost:8000/db-users \
 - `httpx` tracing is optional and only applies if your app uses `httpx`
 - not a replacement for OpenTelemetry or a hosted tracing stack
 
+## Verification And Releases
+
+Pushes and pull requests run automated verification in GitHub Actions.
+
+Releases are tag-driven: pushing `vX.Y.Z` only publishes when `pyproject.toml`
+already contains `X.Y.Z`.
+
+The release pipeline reuses the verification workflow, validates built artifacts
+before publish, publishes to real PyPI via GitHub Actions OIDC / PyPI Trusted
+Publishing, and creates the matching GitHub release.
+
 ## Development
 
 Run the tests with:

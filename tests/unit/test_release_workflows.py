@@ -22,3 +22,23 @@ def test_verify_workflow_runs_docker_suite_builds_artifacts_and_uploads_dist():
     assert "scripts/release/smoke_test_installed_package.py" in workflow
     assert "actions/upload-artifact@v4" in workflow
     assert "name: dist-artifacts" in workflow
+
+
+def test_release_workflow_is_tag_driven_and_calls_verify():
+    workflow = _workflow_text("release")
+
+    assert "tags:" in workflow
+    assert '  - "v*"' in workflow or "  - 'v*'" in workflow
+    assert "uses: ./.github/workflows/verify.yml" in workflow
+    assert "needs: verify" in workflow
+
+
+def test_release_workflow_checks_version_downloads_artifacts_and_uses_oidc_publish():
+    workflow = _workflow_text("release")
+
+    assert "id-token: write" in workflow
+    assert "contents: write" in workflow
+    assert "scripts/release/check_tag_version.py" in workflow
+    assert "actions/download-artifact@v4" in workflow
+    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+    assert "softprops/action-gh-release@v2" in workflow
