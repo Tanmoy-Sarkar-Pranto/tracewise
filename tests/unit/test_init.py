@@ -242,6 +242,26 @@ def test_init_opt_out_after_sqlalchemy_opt_in_removes_engine_listeners(tmp_path)
     assert not event.contains(Engine, "handle_error", tracewise_sqlalchemy._handle_error)
 
 
+def test_init_disabled_clears_state_and_unpatches_sqlalchemy(tmp_path):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+    from tracewise.instrumentation import sqlalchemy as tracewise_sqlalchemy
+
+    app = FastAPI()
+    tracewise.init(app, db_path=str(tmp_path / "enabled.db"), instrument_sqlalchemy=True)
+
+    assert tracewise._sqlalchemy_instrumentation_enabled is True
+    assert event.contains(Engine, "before_cursor_execute", tracewise_sqlalchemy._before_cursor_execute)
+
+    disabled_app = FastAPI()
+    tracewise.init(disabled_app, db_path=str(tmp_path / "disabled.db"), enabled=False)
+
+    assert tracewise._sqlalchemy_instrumentation_enabled is False
+    assert not event.contains(Engine, "before_cursor_execute", tracewise_sqlalchemy._before_cursor_execute)
+    assert not event.contains(Engine, "after_cursor_execute", tracewise_sqlalchemy._after_cursor_execute)
+    assert not event.contains(Engine, "handle_error", tracewise_sqlalchemy._handle_error)
+
+
 async def test_init_wires_middleware_and_viewer(tmp_path):
     app = FastAPI()
     tracewise.init(app, db_path=str(tmp_path / "t.db"))
