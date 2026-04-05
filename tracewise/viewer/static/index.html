@@ -75,9 +75,55 @@
     }
     .span-row:hover { background: #161b22; }
     .span-row.selected { background: #16202a; border-color: #29557a; }
+    .span-row.db { align-items: flex-start; }
+    .span-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+    .db-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 32px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #12324b;
+      border: 1px solid #245676;
+      color: #89d0ff;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .span-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
     .span-name { font-weight: 700; min-width: 0; }
     .span-duration { margin-left: auto; color: #8b949e; }
     .span-kind { color: #6e7681; font-size: 11px; text-transform: uppercase; }
+    .span-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #8b949e;
+      font-size: 11px;
+      flex-wrap: wrap;
+    }
+    .span-preview {
+      color: #9eb2c7;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
     .detail-stack { display: flex; flex-direction: column; gap: 14px; }
     .detail-card {
       border: 1px solid #30363d;
@@ -109,6 +155,26 @@
     .attrs-list { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
     .attr-row { display: grid; grid-template-columns: minmax(0, 140px) minmax(0, 1fr); gap: 10px; }
     .empty-note { color: #8b949e; font-size: 12px; }
+    .detail-section { display: flex; flex-direction: column; gap: 10px; }
+    .section-label {
+      color: #8b949e;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .code-block {
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      background: #0b1016;
+      padding: 12px;
+      color: #d8e4ef;
+    }
     #refresh { float: right; background: none; border: 1px solid #30363d; color: #8b949e; padding: 4px 10px; cursor: pointer; border-radius: 4px; font-size: 11px; }
     #refresh:hover { border-color: #58a6ff; color: #58a6ff; }
     #clear-btn {
@@ -125,11 +191,94 @@
       text-align: left;
     }
     #clear-btn:hover { background: #161b22; }
+    #drawer-backdrop { display: none; }
+    #detail-topbar { display: none; }
+    #trace-drawer-toggle {
+      border: 1px solid #30363d;
+      border-radius: 999px;
+      background: #11161d;
+      color: #c9d1d9;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(2, 6, 12, 0.18);
+    }
+    #trace-drawer-toggle:hover { border-color: #58a6ff; color: #58a6ff; }
+    #current-trace-summary {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    #current-trace-name {
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #current-trace-meta { color: #8b949e; font-size: 11px; }
     @media (max-width: 1080px) {
-      body { flex-direction: column; height: auto; min-height: 100vh; }
-      #sidebar { width: 100%; border-right: none; border-bottom: 1px solid #30363d; }
-      #detail { overflow: visible; }
-      #detail-workspace.ready { grid-template-columns: 1fr; }
+      body { height: 100vh; overflow: hidden; }
+      #sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(360px, 82vw);
+        z-index: 40;
+        border-right: 1px solid #30363d;
+        border-bottom: none;
+        background: #0d1117;
+        transform: translateX(-100%);
+        transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      }
+      body.drawer-open #sidebar { transform: translateX(0); }
+      #drawer-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(5, 8, 12, 0.58);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms cubic-bezier(0.22, 1, 0.36, 1);
+        z-index: 30;
+      }
+      body.drawer-open #drawer-backdrop { opacity: 1; pointer-events: auto; }
+      #detail {
+        min-width: 0;
+        min-height: 100vh;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      #detail-topbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #30363d;
+        background: linear-gradient(180deg, #10161f 0%, #0d1117 100%);
+        box-shadow: 0 12px 28px rgba(2, 8, 14, 0.28);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
+      #detail-empty,
+      #detail-workspace {
+        flex: 1;
+        min-height: 0;
+        margin: 16px;
+      }
+      #detail-empty { height: auto; }
+      #detail-workspace.ready {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      }
+      .span-preview { white-space: normal; }
+      .detail-grid { grid-template-columns: 100px minmax(0, 1fr); }
     }
   </style>
 </head>
@@ -139,7 +288,15 @@
     <ul id="trace-list"></ul>
     <button id="clear-btn">✕ clear all traces</button>
   </div>
+  <div id="drawer-backdrop"></div>
   <div id="detail">
+    <div id="detail-topbar">
+      <button id="trace-drawer-toggle" type="button" aria-expanded="false">Traces</button>
+      <div id="current-trace-summary">
+        <div id="current-trace-name">No trace selected</div>
+        <div id="current-trace-meta">Choose a trace to inspect it.</div>
+      </div>
+    </div>
     <div id="detail-empty">Select a trace to inspect it.</div>
     <div id="detail-workspace">
       <section id="trace-tree-panel" class="panel">

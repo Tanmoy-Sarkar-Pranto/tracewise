@@ -4,6 +4,46 @@ const API = BASE + '/api';
 let activeTraceId = null;
 let activeTraceRoot = null;
 let activeSpanId = null;
+let isDrawerOpen = false;
+
+function isMobileViewport() {
+  return window.innerWidth <= 1080;
+}
+
+function setDrawerOpen(nextOpen) {
+  isDrawerOpen = nextOpen;
+  syncDrawerState();
+}
+
+function syncDrawerState() {
+  const expanded = isMobileViewport() && isDrawerOpen;
+  document.body.classList.toggle('drawer-open', expanded);
+  document.getElementById('trace-drawer-toggle').setAttribute('aria-expanded', String(expanded));
+}
+
+function renderCurrentTraceSummary(traceRoot) {
+  const nameEl = document.getElementById('current-trace-name');
+  const metaEl = document.getElementById('current-trace-meta');
+
+  if (!traceRoot) {
+    nameEl.textContent = 'No trace selected';
+    metaEl.textContent = 'Choose a trace to inspect it.';
+    return;
+  }
+
+  const duration = traceRoot.duration_ms != null ? `${traceRoot.duration_ms.toFixed(1)}ms` : '…';
+  nameEl.textContent = traceRoot.name;
+  metaEl.textContent = `${traceRoot.status} · ${duration}`;
+}
+
+function syncResponsiveLayout() {
+  if (!isMobileViewport()) {
+    isDrawerOpen = false;
+  } else if (!activeTraceRoot) {
+    isDrawerOpen = true;
+  }
+  syncDrawerState();
+}
 
 async function loadTraces() {
   const resp = await fetch(`${API}/traces?limit=100`);
@@ -17,12 +57,14 @@ async function loadTraces() {
     activeSpanId = null;
     showEmptyState('No traces yet. Make a request to your app.');
     list.innerHTML = '<li style="color:#8b949e;padding:16px">No traces yet. Make a request to your app.</li>';
+    syncResponsiveLayout();
     return;
   }
 
   if (!activeTraceRoot) {
     resetEmptyState();
   }
+  syncResponsiveLayout();
 
   traces.forEach(trace => {
     const root = trace.root;
@@ -53,6 +95,7 @@ async function selectTrace(traceId, liEl) {
   activeTraceRoot = data.root;
   activeSpanId = data.root.span_id;
   renderActiveTrace();
+  if (isMobileViewport()) { setDrawerOpen(false); }
 }
 
 function renderActiveTrace() {
@@ -61,11 +104,14 @@ function renderActiveTrace() {
   const tree = document.getElementById('trace-tree');
   const detail = document.getElementById('span-detail');
 
+  renderCurrentTraceSummary(activeTraceRoot);
+
   if (!activeTraceRoot) {
     workspace.classList.remove('ready');
     empty.style.display = 'flex';
     tree.innerHTML = '';
     detail.innerHTML = '';
+    syncResponsiveLayout();
     return;
   }
 
@@ -74,6 +120,7 @@ function renderActiveTrace() {
   workspace.classList.add('ready');
   tree.innerHTML = renderTraceTree(activeTraceRoot);
   detail.innerHTML = renderSelectedSpan(activeSpan);
+  syncResponsiveLayout();
 }
 
 function selectSpan(spanId) {
@@ -95,19 +142,54 @@ function renderTraceTree(root) {
   return renderSpanNode(root);
 }
 
+function isDbSpan(span) {
+  return Boolean(getDbStatement(span) || getDbOperation(span));
+}
+
+function getDbOperation(span) {
+  return span.attributes && span.attributes["db.operation"] ? String(span.attributes["db.operation"]) : "";
+}
+
+function getDbStatement(span) {
+  return span.attributes && span.attributes["db.statement"] ? String(span.attributes["db.statement"]) : "";
+}
+
+function previewStatement(statement, maxLength = 96) {
+  const condensed = statement.replace(/\s+/g, ' ').trim();
+  if (condensed.length <= maxLength) return condensed;
+  return `${condensed.slice(0, maxLength - 1)}…`;
+}
+
 function renderSpanNode(span) {
   const duration = span.duration_ms != null ? `${span.duration_ms.toFixed(1)}ms` : '…';
   const statusClass = `status-${span.status}`;
   const selectedClass = span.span_id === activeSpanId ? ' selected' : '';
+  const dbClass = isDbSpan(span) ? ' db' : '';
+  const statement = getDbStatement(span);
+  const operation = getDbOperation(span);
   const childrenHtml = (span.children || []).map(child => renderSpanNode(child)).join('');
+  const previewHtml = statement
+    ? `<div class="span-preview">${escHtml(previewStatement(statement))}</div>`
+    : '';
+  const badgeHtml = isDbSpan(span) ? '<span class="db-badge">DB</span>' : '';
+  const operationHtml = operation ? `<span>${escHtml(operation)}</span>` : '';
 
   return `
     <div class="span-node">
-      <div class="span-row${selectedClass}" onclick="selectSpan('${span.span_id}')">
+      <div class="span-row${selectedClass}${dbClass}" onclick="selectSpan('${span.span_id}')">
         <span class="${statusClass}">●</span>
-        <span class="span-name">${escHtml(span.name)}</span>
-        <span class="span-duration">${duration}</span>
-        <span class="span-kind">${escHtml(span.kind)}</span>
+        <div class="span-main">
+          ${badgeHtml}
+          <div class="span-copy">
+            <div class="span-name">${escHtml(span.name)}</div>
+            ${previewHtml}
+          </div>
+        </div>
+        <div class="span-meta">
+          ${operationHtml}
+          <span>${escHtml(span.kind)}</span>
+          <span>${duration}</span>
+        </div>
       </div>
       ${childrenHtml ? `<div class="span-children">${childrenHtml}</div>` : ''}
     </div>
@@ -115,6 +197,13 @@ function renderSpanNode(span) {
 }
 
 function renderSelectedSpan(span) {
+  if (isDbSpan(span)) {
+    return renderDbSpanDetail(span);
+  }
+  return renderGenericSpanDetail(span);
+}
+
+function renderGenericSpanDetail(span) {
   return `
     <div class="detail-stack">
       <section class="detail-card">
@@ -132,6 +221,47 @@ function renderSelectedSpan(span) {
       </section>
       <section class="detail-card">
         <div class="detail-overline">Attributes</div>
+        ${renderRawAttributes(span.attributes || {})}
+      </section>
+    </div>
+  `;
+}
+
+function renderDbSpanDetail(span) {
+  const statement = getDbStatement(span);
+  const operation = getDbOperation(span) || 'DB';
+  const system = span.attributes && span.attributes["db.system"] ? String(span.attributes["db.system"]) : 'unknown';
+  const title = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="db-badge">DB</span>
+      <div class="detail-title" style="margin-bottom:0">${escHtml(span.name)}</div>
+    </div>
+  `;
+
+  return `
+    <div class="detail-stack">
+      <section class="detail-card">
+        <div class="detail-overline">Selected Span</div>
+        ${title}
+        <div class="detail-grid" style="margin-top:12px">
+          ${renderMetadataRows([
+            ['Operation', operation],
+            ['System', system],
+            ['Status', span.status],
+            ['Kind', span.kind],
+            ['Duration', span.duration_ms != null ? `${span.duration_ms.toFixed(1)}ms` : '…'],
+            ['Parent', span.parent_span_id || 'root'],
+          ])}
+        </div>
+      </section>
+      <section class="detail-card detail-section">
+        <div class="section-label">SQL Preview</div>
+        ${statement
+          ? `<pre class="code-block">${escHtml(statement)}</pre>`
+          : '<div class="empty-note">No db.statement captured for this span.</div>'}
+      </section>
+      <section class="detail-card">
+        <div class="detail-overline">Raw Attributes</div>
         ${renderRawAttributes(span.attributes || {})}
       </section>
     </div>
@@ -187,4 +317,8 @@ document.getElementById('clear-btn').onclick = async () => {
   loadTraces();
 };
 
+document.getElementById('trace-drawer-toggle').onclick = () => setDrawerOpen(!isDrawerOpen);
+document.getElementById('drawer-backdrop').onclick = () => setDrawerOpen(false);
+window.addEventListener('resize', syncResponsiveLayout);
+syncResponsiveLayout();
 loadTraces();

@@ -108,6 +108,16 @@ async def test_viewer_root_serves_selection_based_shell(viewer):
     assert 'id="span-detail"' in resp.text
 
 
+async def test_viewer_root_serves_mobile_trace_drawer_shell(viewer):
+    async with AsyncClient(transport=ASGITransport(app=viewer), base_url="http://test") as client:
+        resp = await client.get("/")
+
+    assert resp.status_code == 200
+    assert 'id="detail-topbar"' in resp.text
+    assert 'id="trace-drawer-toggle"' in resp.text
+    assert 'id="drawer-backdrop"' in resp.text
+
+
 async def test_duration_ms_in_trace_list(viewer, storage, make_span):
     root = make_span(trace_id="t1", span_id="r", name="GET /x")
     root.end_time = root.start_time + timedelta(milliseconds=120)
@@ -119,6 +129,35 @@ async def test_duration_ms_in_trace_list(viewer, storage, make_span):
 
     data = resp.json()
     assert abs(data[0]["root"]["duration_ms"] - 120) < 5
+
+
+async def test_get_trace_preserves_db_metadata_for_viewer_detail(viewer, storage, make_span):
+    root = make_span(trace_id="t1", span_id="root", name="GET /db-users")
+    child = make_span(
+        trace_id="t1",
+        span_id="child",
+        parent_span_id="root",
+        name="SQL SELECT",
+        kind=SpanKind.CLIENT,
+    )
+    root.end_time = utcnow()
+    child.end_time = utcnow()
+    child.attributes = {
+        "db.operation": "SELECT",
+        "db.statement": "SELECT id, name FROM demo_users ORDER BY id",
+        "db.system": "sqlite",
+    }
+    storage.save_span(root)
+    storage.save_span(child)
+
+    async with AsyncClient(transport=ASGITransport(app=viewer), base_url="http://test") as client:
+        resp = await client.get("/api/traces/t1")
+
+    data = resp.json()
+    db_child = data["root"]["children"][0]
+    assert db_child["name"] == "SQL SELECT"
+    assert db_child["attributes"]["db.operation"] == "SELECT"
+    assert db_child["attributes"]["db.statement"].startswith("SELECT id, name")
 
 
 async def test_testapp_db_users_routes_seed_and_trace_sqlalchemy(tmp_path, monkeypatch):
