@@ -98,6 +98,16 @@ async def test_delete_traces_clears_all(viewer, storage, make_span):
     assert storage.list_traces() == []
 
 
+async def test_viewer_root_serves_selection_based_shell(viewer):
+    async with AsyncClient(transport=ASGITransport(app=viewer), base_url="http://test") as client:
+        resp = await client.get("/")
+
+    assert resp.status_code == 200
+    assert 'id="detail-workspace"' in resp.text
+    assert 'id="trace-tree"' in resp.text
+    assert 'id="span-detail"' in resp.text
+
+
 async def test_duration_ms_in_trace_list(viewer, storage, make_span):
     root = make_span(trace_id="t1", span_id="r", name="GET /x")
     root.end_time = root.start_time + timedelta(milliseconds=120)
